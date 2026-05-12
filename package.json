@@ -1,0 +1,21 @@
+{
+    "name": "yakakartyarrak",
+    "version": "1.0.0",
+    "description": "",
+    "main": "app.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "start": "node server.js"
+    },
+    "keywords": [],
+    "author": "",
+    "type": "module",
+    "license": "ISC",
+    "dependencies": {
+        "csv-parse": "^6.2.1",
+        "pdf-lib": "^1.17.1"
+    },
+    "devDependencies": {
+        "@types/qrcode": "^1.5.6"
+    }
+}
