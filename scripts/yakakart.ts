@@ -14,7 +14,7 @@ import { v4 as uuidv4 } from "uuid";
 import fontkit, { Font } from "@pdf-lib/fontkit";
 import * as QRCode from "qrcode";
 
-class CommitteeConfig {
+class TemplateConfig {
   constructor(
     public templatePath: string,
     public templateDoc: PDFDocument,
@@ -43,6 +43,7 @@ class Config {
     public successfulUsersPath: string,
     public templatesPath: string,
     public usersPath: string,
+    public templateCriteria: string | null
   ) { }
 }
 
@@ -57,7 +58,8 @@ class ProcessingResult {
 
 class TextConfig {
   constructor(
-    public field: string,
+    public fields: string[],
+    public formatString: string,
     public fontPath: string,
     public fontBytes: Buffer,
     public x: string,
@@ -103,6 +105,12 @@ const loadConfig = async (configPath: string) => {
   return config;
 }
 
+
+const stringFormat = (str: string, ...args: any[]) => {
+  return str.replace(/{(\d+)}/g, (match, index) => {
+    return args[index] !== undefined ? args[index] : match;
+  });
+};
 
 const removeSpaces = (str: string) => {
   return str
@@ -153,13 +161,17 @@ const prepareText = async (textConfig: TextConfig, object: any, pdfDoc: PDFDocum
   if (!textConfig.prepared) {
     throw new Error(`TextConfig is not prepared, call prepareTextConfig first!`);
   }
-  if (!object[textConfig.field]) {
-    throw new Error(`Object ${object.toString()} has no field named: ${textConfig.field}`);
+  let strArgs = [];
+  for (const field of textConfig.fields) {
+    if (!object[field]) {
+      throw new Error(`Object ${object.toString()} has no field named: ${field}`);
+    }
+    if (object[field] == null) {
+      throw new Error(`Object ${object.toString()} has a null field named: ${field}`);
+    }
+    strArgs.push(object[field]);
   }
-  if (object[textConfig.field] == null) {
-    throw new Error(`Object ${object.toString()} has a null field named: ${textConfig.field}`);
-  }
-  const text = object[textConfig.field].toString();
+  const text = stringFormat(textConfig.formatString, strArgs);
   pdfDoc.registerFontkit(fontkit);
   const font = await pdfDoc.embedFont(textConfig.fontBytes);
   return new TextSettings(text, font, textConfig.x, textConfig.y, textConfig.fontSize, textConfig.color, textConfig.page);
@@ -177,7 +189,7 @@ const processText = async (text: TextSettings, pdfDocument: PDFDocument) => {
   })
 }
 
-const processUser = async (user: User, committeeConfig: Record<string, CommitteeConfig>) => {
+const processUser = async (user: User, templateConfigs: Record<string, TemplateConfig>, config: Config) => {
   // Fixing typo issues in names
   if (user.fullName == null) {
     throw new Error("There's no name!");
@@ -189,32 +201,39 @@ const processUser = async (user: User, committeeConfig: Record<string, Committee
     throw new Error("The user has no id!");
   }
   // Check and load committee config
-  const committee = committeeConfig[user.committee];
-  if (!committee) {
-    throw new Error("Invalid committee name!");
+  let templateConfig: TemplateConfig;
+  if (config.templateCriteria != null && !(user as any)[config.templateCriteria]) {
+    templateConfig = templateConfigs[(user as any)[config.templateCriteria]];
+  }
+  else {
+    templateConfig = templateConfigs["default"];
+  }
+  if (!templateConfig) {
+    throw new Error("Invalid template config name!");
   }
   user.fullName = titleCase(user.fullName);
   user.fullName = removeSpaces(user.fullName);
+  user.fullName = user.fullName.toUpperCase();
   // Copy the desired doc for the committee
-  let pdfDoc = await committee.templateDoc.copy();
-  for (const textConfig of committee.textConfigs) {
+  let pdfDoc = await templateConfig.templateDoc.copy();
+  for (const textConfig of templateConfig.textConfigs) {
     const text = await prepareText(textConfig, user, pdfDoc);
     await processText(text, pdfDoc);
   }
-  const firstPage = pdfDoc.getPage(0);
+  // const firstPage = pdfDoc.getPage(0);
 
-  const id = user.userId ? user.userId.toString() : user.personnelId ? user.personnelId : "NULL";
-  const qrCodeData = await QRCode.toBuffer(id, {
-    width: 200,
-    margin: 2,
-  });
-  const qrImage = await pdfDoc.embedPng(qrCodeData);
-  firstPage.drawImage(qrImage, {
-    x: 120 - 24,
-    y: 82 - 24,
-    width: 48,
-    height: 48,
-  });
+  // const id = user.userId ? user.userId.toString() : user.personnelId ? user.personnelId : "NULL";
+  // const qrCodeData = await QRCode.toBuffer(id, {
+  //   width: 200,
+  //   margin: 2,
+  // });
+  // const qrImage = await pdfDoc.embedPng(qrCodeData);
+  // firstPage.drawImage(qrImage, {
+  //   x: 120 - 24,
+  //   y: 82 - 24,
+  //   width: 48,
+  //   height: 48,
+  // });
   return pdfDoc;
 }
 
@@ -231,7 +250,7 @@ const loadCommitteeConfig = async (committeeConfigPath: string) => {
   if (!fs.existsSync(committeeConfigPath)) {
     throw new Error("Committee config file not found!");
   }
-  const committeeConfig: Record<string, CommitteeConfig> = JSON.parse(
+  const committeeConfig: Record<string, TemplateConfig> = JSON.parse(
     fs.readFileSync(committeeConfigPath, "utf8")
   );
   return committeeConfig;
@@ -249,7 +268,7 @@ const loadUsers = async (usersPath: string) => {
 
 
 
-const prepareCommitteeConfigs = async (committeeConfig: Record<string, CommitteeConfig>, templatesPath: string) => {
+const prepareCommitteeConfigs = async (committeeConfig: Record<string, TemplateConfig>, templatesPath: string) => {
   if (!fs.existsSync(templatesPath)) {
     throw new Error("Templates folder not found!");
   }
@@ -323,7 +342,7 @@ const processAll = async (processingMode: ProcessingMode, configPath: string) =>
 
   for (const user of users) {
     try {
-      let userDocument = await processUser(user, committeeConfig);
+      let userDocument = await processUser(user, committeeConfig, config);
       const resultPath = path.join(resultsFolder, `${user.userId}-${user.fullName}-${user.committee}.pdf`);
       fs.writeFileSync(resultPath, await userDocument.save());
       successfulUsers.push(new ProcessingResult(user, true, null));
@@ -350,4 +369,5 @@ const processAll = async (processingMode: ProcessingMode, configPath: string) =>
 }
 
 processAll(ProcessingMode.AllUsers, "./assets/certificateConfig.json");
+processAll(ProcessingMode.AllUsers, "./assets/certificatePersonnelConfig.json");
 // processAll(ProcessingMode.AllUsers, "./assets/personnelConfig.json");
