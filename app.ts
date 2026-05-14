@@ -43,9 +43,9 @@ const fetchUsers = async () => {
         console.log(`✅ Toplam ${users.length} kullanıcı getirildi.`);
 
         // Verileri listele (opsiyonel)
-        fs.writeFileSync("./status/users.json", JSON.stringify(users));
+        fs.writeFileSync("./status/delegates.json", JSON.stringify(users));
         fs.writeFileSync("./status/personnels.json", JSON.stringify(personnels));
-        console.log("Users and personnels have been saved to status/ folder");
+        console.log("Delegates and personnels have been saved to status/ folder");
 
     } catch (error) {
         console.error('❌ Veri çekme hatası:', error);
